@@ -7,7 +7,7 @@
 #
 
 # Setup
-logfile="/var/log/rawcheck.log"
+logfile=~/rawcheck.log
 
 if [ -z "$1" ]; then
     echo "rawcheck"
@@ -36,23 +36,40 @@ md5sum="md5sum"
 #ufraw-batch
 ufrawbatch="ufraw-batch"
 
+OPTION_NOHASH="1"
 
+
+# Parse command line tools.
+while [[ $# > 1 ]]
+do
+	key="$1"
+
+	case $key in
+		--nohash)
+		OPTION_NOHASH="1"
+		shift
+		;;
+		*)
+		echo "Invalid option. $key"
+		;;
+	esac
+done
 datestamp=$(date +"%m-%d-%y %T")
 
 
-if [ ! -f $1 ]; then
-    echo "Unable to find: $1"
+if [ ! -f "$@" ]; then
+    echo "Unable to find: $@"
     exit -1
 fi
 
 echo "rawcheck"
-echo "Checking file: $1"
+echo "Checking file: $@"
 
-filewithpath=$1
-filepath=$(dirname "${1}")
-filename=$(basename "${1}")
+filewithpath="$@"
+filepath=$(dirname "${@}")
+filename=$(basename "${@}")
 filebasename="${filename%.*}"
-realpath=$(realpath -q $1)
+realpath=$(realpath -q "$@")
 
 
 # Function definitions.
@@ -81,7 +98,7 @@ hash_check () {
 function ufraw_extract {
     # Use ufraw-batch to extract the embedded preview image and verify. Return 0 if success, 1 if failure.
     echo "Extracting preview file..."
-    $ufrawbatch --embedded-image --out-path="/tmp" --overwrite --output="/tmp/rawcheck_ufraw_jpeg.tmp" --silent $filewithpath
+    $ufrawbatch --embedded-image --out-path="/tmp" --overwrite --output="/tmp/rawcheck_ufraw_jpeg.tmp" --silent "$filewithpath"
     ufraw_error_code=$?
     echo "ufraw-batch returned $ufraw_error_code"
     rm -f "/tmp/rawcheck_ufraw_jpeg.tmp"
@@ -106,7 +123,7 @@ logit () {
 exiftool_ident () {
     # Use Exiftool and verify there were no errors during processing. Returns xml if clean, 1 if there is an error.
     echo "Dumping metadata with ExifTool."
-    exiftool_output=$($exiftool -X $filewithpath)
+    exiftool_output=$($exiftool -X "$filewithpath")
     exiftool_exit=$?
     echo "EXIFTool Exited with: $exiftool_exit"
     #Check EXIFTool XML for an error message, contained in the ExifTool::Error tag.
@@ -133,7 +150,7 @@ exiftool_ident () {
 dcraw_tiff () {
     # Process the raw file as a tiff, success returns 0, fail returns 1. Document mode only is black and white for speed.
     echo "Processing file as TIFF..."
-    dcraw_output=$($dcraw -T -d -T -c $filewithpath >/tmp/dcraw_output.tiff)
+    dcraw_output=$($dcraw -T -d -T -c "$filewithpath" >/tmp/dcraw_output.tiff)
     dcraw_error_code=$?
     rm -f /tmp/dcraw_output.tiff
     if [ "$dcraw_error_code" -ne "0" ]; then
@@ -152,19 +169,19 @@ dcraw_tiff () {
 
 #Check for hash, if its found verify the file hasn't changed.
 
-if [ -f $filepath/$filebasename.md5 ]; then
-    #Found md5 file, checking hash.
-    hash_check
-    hash_check_error=$?
-    if [ "$hash_check_error" -eq "0" ]; then
-        #Hashes match, thats good, we can exit.
-        echo "Verified hashes match, skipping..."
-        exit 0
-    else
-        #Looks like the file has changed
-        echo "File does not match hash, maybe file has changed."
-        logit "$realpath - FAIL - TEST:md5_checksum"
-    fi
+if [ -f "$filepath/$filebasename.md5" ] && [ "$OPTION_NOHASH" -eq "0" ]; then
+	#Found md5 file, checking hash.
+	hash_check
+	hash_check_error=$?
+	if [ "$hash_check_error" -eq "0" ]; then
+		#Hashes match, thats good, we can exit.
+		echo "Verified hashes match, skipping..."
+		exit 0
+	else
+		#Looks like the file has changed
+		echo "File does not match hash, maybe file has changed."
+		logit "$realpath - FAIL - TEST:md5_checksum"
+	fi
 else
     #Hash file not found, need to verify file and create one, first we need to check the file for corruption.
 
@@ -206,7 +223,9 @@ else
     fi
 
     #Finally create the md5 hash since we are fairly certian this file is ok.
-    hash_create
+	if [ "$OPTION_NOHASH" -ne "1" ]; then
+    		hash_create
+	fi
 
 fi
 
